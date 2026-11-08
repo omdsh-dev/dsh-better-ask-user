@@ -458,22 +458,18 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions }: Questi
       >
         <header className={css.header}>
           <div className={css.headingBlock}>
-            <div className={css.titleRow}>
-              <div
-                className={css.title}
-                id={questionId}
-                role="heading"
-                aria-level={2}
-              >
-                <MarkdownText text={question.question} variant="compact" labels={markdownLabels} />
+            {question.header !== undefined && question.header.trim() !== question.question.trim() && (
+              <div className={css.eyebrow}>
+                <MarkdownText text={question.header} variant="compact" labels={markdownLabels} />
               </div>
-              {question.header !== undefined && question.header.trim() !== question.question.trim()
-                && !question.question.toLocaleLowerCase().includes(question.header.trim().toLocaleLowerCase()) && (
-                <span className={css.headerChip}>
-                  <MarkdownText text={question.header} variant="compact" labels={markdownLabels} />
-                </span>
-              )}
-              {review !== undefined && <span className={css.statusChip}>{t('review.status')}</span>}
+            )}
+            <div
+              className={css.title}
+              id={questionId}
+              role="heading"
+              aria-level={2}
+            >
+              <MarkdownText text={question.question} variant="compact" labels={markdownLabels} />
             </div>
           </div>
           <div className={css.headerActions}>
@@ -498,6 +494,7 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions }: Questi
           </div>
         </header>
         <QuestionWaitBar card={card} t={t} busy={busy !== null} onTakeTime={takeTime} />
+        {review !== undefined && <div className={css.reviewStatus}>{t('review.status')}</div>}
 
         {!minimized && (
           <>

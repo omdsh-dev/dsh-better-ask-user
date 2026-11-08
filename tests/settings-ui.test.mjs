@@ -16,7 +16,7 @@ const hadWindow = Object.prototype.hasOwnProperty.call(globalThis, 'window')
 const prevWindow = globalThis.window
 try {
   globalThis.window = { __ModuleLoader__: { load(v) { entry = v } } }
-  eval(readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8'))
+  eval(readFileSync(process.env.DSH_ASK_SETTINGS_BUNDLE ?? new URL('../lib/client.js', import.meta.url), 'utf8'))
 } finally {
   if (hadWindow) globalThis.window = prevWindow
   else delete globalThis.window
@@ -65,15 +65,16 @@ function makeForm(options = {}) {
 
 async function mount(options = {}) {
   const controller = options.controller ?? makeForm(options.form ?? {})
+  const translate = 't' in options ? options.t : t
   let renderer
   await act(async () => {
-    renderer = TestRenderer.create(h(SettingsEntry, { view: 'page', t, form: { state: controller.getSnapshot(), mutate: (ops, r) => controller.mutate(ops, r) } }))
+    renderer = TestRenderer.create(h(SettingsEntry, { view: 'page', t: translate, form: { state: controller.getSnapshot(), mutate: (ops, r) => controller.mutate(ops, r) } }))
   })
   return {
     renderer,
     controller,
     async update() {
-      await act(async () => { renderer.update(h(SettingsEntry, { view: 'page', t, form: { state: controller.getSnapshot(), mutate: (ops, r) => controller.mutate(ops, r) } })) })
+      await act(async () => { renderer.update(h(SettingsEntry, { view: 'page', t: translate, form: { state: controller.getSnapshot(), mutate: (ops, r) => controller.mutate(ops, r) } })) })
     },
     async run(fn) { await act(async () => { await fn() }) },
   }
@@ -92,7 +93,8 @@ test('settings page: compact named section, labeled controls, defaults, a11y hin
   const titles = renderer.root.findAll((n) => host(n) && n.type === 'h2')
   assert.equal(titles.length, 1, 'settings has one page title')
   assert.deepEqual(titles[0].children, ['title'])
-  assert.equal(renderer.root.findAllByType('h3').length, 1, 'timeout controls have a subordinate section heading')
+  assert.equal(renderer.root.findAllByType('h3').length, 3, 'wait, timeout and goal sections each have a heading')
+  assert.equal(renderer.root.findAll((n) => host(n) && n.type === 'button' && n.props?.['data-preset'] !== undefined).length, 4, 'wait section offers four preset durations')
   assert.equal(renderer.root.findByType('section').props['aria-label'], 'title')
   for (const id of ['better-ask-user-wait-mode', 'better-ask-user-behavior', 'better-ask-user-goal-behavior']) {
     const group = byId(renderer, id)
@@ -138,7 +140,7 @@ test('wait editing: 0 blocks save, unlimited mode saves -1 with one op', async (
   await act(async () => { byId(renderer, 'better-ask-user-wait-mode-unlimited').props.onChange() })
   assert.equal(byId(renderer, 'better-ask-user-wait'), undefined)
   assert.equal(byId(renderer, 'better-ask-user-behavior'), undefined)
-  assert.equal(byId(renderer, 'better-ask-user-goal-behavior'), undefined)
+  assert.ok(byId(renderer, 'better-ask-user-goal-behavior'), 'goal behavior stays visible without a countdown')
   assert.equal(saveButton(renderer).props.disabled, false)
   await act(async () => { saveButton(renderer).props.onClick(); await Promise.resolve() })
   assert.deepEqual(controller.calls[0].ops, [{ op: 'set', path: ['questionTimeoutSeconds'], value: -1 }])
@@ -183,3 +185,40 @@ test('readonly disables controls; refused and failed saves surface notices', asy
   assert.equal(failed.controller.calls.length, 1, 'discard only clears local state after a failed save')
   await act(async () => { failed.renderer.unmount() })
 })
+
+test('settings copy: card consequences follow the selected behavior and explain Goal priority', async () => {
+  const { renderer } = await mount({ t: undefined })
+  const hintText = (id) => byId(renderer, id).children.join('')
+  for (const id of ['better-ask-user-wait-hint', 'better-ask-user-goal-hint', 'better-ask-user-behavior-native-desc', 'better-ask-user-goal-behavior-native-desc']) {
+    const hint = byId(renderer, id)
+    assert.doesNotMatch(hint.props.className ?? '', /srOnly/, id + ' must be visible')
+    assert.notEqual(hint.props.hidden, true)
+    assert.notEqual(hint.props['aria-hidden'], true)
+  }
+  assert.equal(hintText('better-ask-user-wait-hint'), 'Typing restarts the countdown.')
+  assert.match(text(renderer), /Leave question open/)
+  assert.match(text(renderer), /Submit defaults/)
+  assert.match(hintText('better-ask-user-behavior-native-desc'), /question stays answerable.*No automatic approval/)
+  assert.match(hintText('better-ask-user-goal-hint'), /can block resumption.*timeout behavior/)
+  await act(async () => { byId(renderer, 'better-ask-user-behavior-default').props.onChange() })
+  assert.match(hintText('better-ask-user-behavior-default-desc'), /Only questions with a default answer.*Without a default the question stays open/)
+  assert.match(hintText('better-ask-user-goal-behavior-native-desc'), /question stays answerable/, 'Goal behavior remains independent')
+  await act(async () => { byId(renderer, 'better-ask-user-goal-behavior-default').props.onChange() })
+  assert.match(hintText('better-ask-user-goal-behavior-default-desc'), /Only questions with a default answer.*Without a default the question stays open/)
+  await act(async () => { renderer.unmount() })
+})
+
+test('settings copy: unlimited has one concise consequence and saving applies to new questions', async () => {
+  const { renderer, update } = await mount({ t: undefined })
+  await act(async () => { byId(renderer, 'better-ask-user-wait-mode-unlimited').props.onChange() })
+  assert.equal(byId(renderer, 'better-ask-user-wait-hint').children.join(''), 'Wait until answered; no timeout action runs.')
+  assert.equal(byId(renderer, 'better-ask-user-behavior'), undefined)
+  assert.ok(byId(renderer, 'better-ask-user-goal-behavior'), 'goal behavior stays visible without a countdown')
+  assert.ok(byId(renderer, 'better-ask-user-goal-hint'), 'goal explanation stays visible without a countdown')
+  await act(async () => { saveButton(renderer).props.onClick(); await Promise.resolve() })
+  await update()
+  assert.match(text(renderer), /Saved for new questions/)
+  assert.doesNotMatch(text(renderer), /configuration|host|memory|editor/i)
+  await act(async () => { renderer.unmount() })
+})
+

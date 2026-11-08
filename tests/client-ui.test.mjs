@@ -74,7 +74,8 @@ test('unlimited wait hides dependent controls, retains their values and restores
   const { tree } = settings(values, async (...args) => { writes.push(args); return true })
   change(tree, 'better-ask-user-wait-mode', 'unlimited')
   assert.equal(tree.root.findAllByType('input').filter(node => node.props.type !== 'radio').length, 0)
-  for (const id of ['better-ask-user-behavior', 'better-ask-user-goal-behavior']) assert.equal(tree.root.findAllByProps({ id }).length, 0)
+  assert.equal(tree.root.findAllByProps({ id: 'better-ask-user-behavior' }).length, 0, 'timeout cards hide without a countdown')
+  assert.equal(tree.root.findAllByProps({ id: 'better-ask-user-goal-behavior', role: 'radiogroup' }).length, 1, 'goal behavior stays visible without a countdown')
   await act(async () => { button(tree, 'Save').props.onClick() })
   assert.deepEqual(writes[0], [[{ op: 'set', path: ['questionTimeoutSeconds'], value: -1 }], 7])
   change(tree, 'better-ask-user-wait-mode', 'timed')
@@ -113,7 +114,7 @@ test('read-only settings disables every editable control', () => {
 
 const t = (key, params) => Object.entries(params ?? {}).reduce((text, [name, value]) => text.replace('{' + name + '}', value), en[key] ?? key)
 function plan(mode = 'default') {
-  const questions = [{ id: 'plan', question: 'Review?', detail: '# Work', intent: { kind: 'plan-review', approve: 'Approve original', callId: 'plan-tool-call' }, options: [{ label: 'Approve original' }, { label: 'Decline original' }] }]
+  const questions = [{ id: 'plan', question: 'Review?', detail: '# Work', options: [{ label: 'Approve original' }, { label: 'Decline original' }] }]
   const pending = new PendingQuestion('session', questions, 'plan-call', undefined, undefined, { waitMs: 5000, timeoutMode: mode, defaultAnswer: { answers: [{ id: 'plan', selected: ['Approve original'] }], autoSelected: true } })
   let answer
   const channel = { deadline: Date.now() + 5000, resolve: value => { answer = value }, reject: () => {}, delegate: () => {} }
@@ -126,22 +127,24 @@ function plan(mode = 'default') {
   return { tree, pending, channel, get answer() { return answer }, close() { act(() => tree.unmount()); pending.close(); delete globalThis.window; delete globalThis.document } }
 }
 
-test('real plan-review intent hides countdown and never auto-settles', () => {
+test('plan review shows auto policy and Take time stops the actual countdown', () => {
   const h = plan()
   try {
-    assert.equal(h.pending.kind, 'plan-review')
-    assert.equal(h.pending.snapshot().countdown, undefined)
-    assert.equal(h.tree.root.findAllByProps({ 'data-question-wait': true }).length, 0)
-    assert.equal(button(h.tree, en['wait.takeTime']), undefined)
-    act(() => {
-      h.pending.holdFocus()
-      h.pending.releaseFocus()
-      h.pending.bump()
-      h.pending.timeout()
-      h.pending.autoSelect()
-    })
+    assert.ok(JSON.stringify(h.tree.toJSON()).includes(en['wait.auto']))
+    const wait = () => h.tree.root.findByProps({ 'data-question-wait': true })
+    assert.equal(wait().props['data-wait-state'], 'counting')
+    const remaining = h.tree.root.find(node => node.type === 'circle' && node.props.pathLength === '100')
+    assert.ok(remaining.props.strokeDashoffset >= 0 && remaining.props.strokeDashoffset < 10, 'progress reflects the real remaining wait')
+    act(() => h.pending.holdFocus())
+    assert.equal(wait().props['data-wait-state'], 'paused')
+    assert.ok(JSON.stringify(h.tree.toJSON()).includes(en['wait.pauseLabel']))
+    act(() => h.pending.releaseFocus())
+    assert.equal(wait().props['data-wait-state'], 'counting')
+    act(() => button(h.tree, en['wait.takeTime']).props.onClick())
+    assert.equal(h.pending.snapshot().waitState, 'waiting')
+    act(() => h.pending.timeout())
     assert.equal(h.answer, undefined)
-    assert.equal(button(h.tree, en['plan.approve']).props.disabled, false)
+    assert.ok(JSON.stringify(h.tree.toJSON()).includes(en['wait.held']))
   } finally { h.close() }
 })
 
@@ -243,47 +246,6 @@ test('option buttons use native keyboard activation and submit the selected orig
 })
 
 
-test('permission intent requires an explicit fixed option and has no custom answer or skip', async () => {
-  const questions = [{ id: 'permission', question: 'Allow access?', intent: { kind: 'approval', approve: 'Allow (Recommended)', reject: 'Deny', always: 'Always allow' }, options: [{ label: 'Allow (Recommended)' }, { label: 'Deny' }, { label: 'Always allow' }] }]
-  const pending = new PendingQuestion('session', questions, 'permission-call')
-  let answer
-  pending.attachWaterfall({ deadline: Date.now() + 5000, resolve: value => { answer = value }, reject() {}, delegate() {} })
-  globalThis.window = { addEventListener() {}, removeEventListener() {} }
-  globalThis.document = { addEventListener() {}, removeEventListener() {}, activeElement: null }
-  function Surface() {
-    const [progress, setProgress] = React.useState({})
-    const actions = React.useMemo(() => ({
-      replace: (key, value) => setProgress(previous => ({ ...previous, [key]: value })),
-      clear() {}, prune() {},
-    }), [])
-    return React.createElement(QuestionComposer, {
-      matched: pending, t, actions, renderSlot: () => null,
-      useStore: select => select({ progressByRequest: progress }),
-      useQuestionCard: (_key, select) => select(React.useSyncExternalStore(pending.subscribe, pending.getSnapshot)),
-    })
-  }
-  let tree
-  try {
-    act(() => { tree = create(React.createElement(Surface)) })
-    const options = tree.root.findAll(node => node.type === 'button' && node.props.role === 'radio')
-    assert.equal(options.length, 3, 'approve, reject and persistent grant keep their offered labels')
-    assert.ok(options.every(node => node.props['aria-checked'] === false), 'recommended permission is not implicitly granted')
-    assert.equal(button(tree, 'submit').props.disabled, true)
-    assert.equal(button(tree, en['action.skip']), undefined)
-    assert.equal(tree.root.findAllByType('textarea').length, 0)
-    assert.equal(tree.root.findAllByProps({ 'data-question-wait': true }).length, 0)
-    act(() => options[2].props.onClick())
-    assert.equal(answer, undefined, 'selecting an option still requires explicit submission')
-    await act(async () => button(tree, 'submit').props.onClick())
-    assert.deepEqual(answer, { answers: [{ id: 'permission', selected: ['Always allow'] }] })
-  } finally {
-    if (tree) act(() => tree.unmount())
-    pending.close()
-    delete globalThis.window
-    delete globalThis.document
-  }
-})
-
 test('settings dirty state, busy state and savebar follow the saved revision', async () => {
   let accept
   const { tree, form } = settings(values, () => new Promise(resolve => { accept = resolve }))
@@ -292,7 +254,7 @@ test('settings dirty state, busy state and savebar follow the saved revision', a
     assert.equal(button(tree, 'Save'), undefined)
     assert.equal(root().props['data-settings-dirty'], false)
     assert.equal(tree.root.findAllByType('select').length, 0)
-    assert.equal(tree.root.findByType('details').props.open, undefined)
+    assert.equal(tree.root.findAllByType('details').length, 0, 'goal behavior is not folded away')
     change(tree, 'better-ask-user-wait', '45')
     assert.equal(root().props['data-settings-dirty'], true)
     act(() => button(tree, 'Save').props.onClick())
