@@ -494,7 +494,7 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions }: Questi
           </div>
         </header>
         <QuestionWaitBar card={card} t={t} busy={busy !== null} onTakeTime={takeTime} />
-        {review !== undefined && <div className={css.reviewStatus}>{t('review.status')}</div>}
+        {review !== undefined && <div className={css.reviewStatus}>{review.length === 0 ? t('review.unanswered') : t('review.status')}</div>}
 
         {!minimized && (
           <>

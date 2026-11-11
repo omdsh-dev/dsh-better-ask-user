@@ -16,6 +16,7 @@ button.row:focus-visible { outline: 2px solid var(--cfg-accent); outline-offset:
 .icon svg { width: 14px; height: 14px; }
 .summary { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .open { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--cfg-muted); font-size: 12px; }
+.state { flex: none; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
 .error { display: block; padding: 4px 8px 4px 30px; color: var(--dsw-alias-state-error-primary); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
 @media (max-width: 640px) { .row { min-height: 44px; align-items: flex-start; padding-block: 10px; } .summary { white-space: normal; overflow-wrap: anywhere; } .open { align-self: center; } }
 @media (pointer: coarse) { .row { min-height: 44px; } }

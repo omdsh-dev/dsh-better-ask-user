@@ -18,6 +18,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { ComposerChainProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { PendingInteractionPublisher } from '@deepseek-ai/dsh-client-ui-session/client'
+import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { TypertClientEventListener } from '@deepseek-ai/dsh-typert-protocol'
 import type { AskUserQuestionItem, PendingUserQuestion, UserQuestionProjectionView } from '@deepseek-ai/dsh-user-questions/types'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
@@ -84,6 +85,8 @@ interface QuestionCard {
  */
 class QuestionCards {
   readonly #cards = new Map<string, QuestionCard>()
+  readonly #presenceSources = new Map<string, HostObservable<boolean>>()
+  readonly #presenceListeners = new Set<() => void>()
 
   constructor(private readonly publish: PendingInteractionPublisher<PendingQuestion>) {}
 
@@ -94,6 +97,34 @@ class QuestionCards {
   /** Observable state for one card while the registry owns it. */
   source(key: string): PendingQuestion | undefined {
     return this.#cards.get(key)?.pending
+  }
+
+  /**
+   * Observable existence of one tool call's card. The transcript row offers
+   * reopening only while the registry still holds that card; a removed card
+   * flips the snapshot so the stale affordance disappears with it.
+   * @param sessionId - owning Session.
+   * @param callId - tool call identity as the transcript row spells it.
+   * @returns a stable source that notifies when the card is added or removed.
+   */
+  presence(sessionId: SessionId, callId: string): HostObservable<boolean> {
+    const key = PendingQuestion.keyOf(sessionId, callId)
+    let source = this.#presenceSources.get(key)
+    if (source === undefined) {
+      source = {
+        getSnapshot: () => this.#cards.has(key),
+        subscribe: (listener) => {
+          this.#presenceListeners.add(listener)
+          return () => { this.#presenceListeners.delete(listener) }
+        },
+      }
+      this.#presenceSources.set(key, source)
+    }
+    return source
+  }
+
+  #publishPresence(): void {
+    for (const listener of [...this.#presenceListeners]) listener()
   }
 
   values(): readonly QuestionCard[] {
@@ -149,6 +180,7 @@ class QuestionCards {
         /* v8 ignore next -- a card leaves the registry once; no caller holds a card the registry already replaced. */
         if (this.#cards.get(pending.key) !== card) return
         this.#cards.delete(pending.key)
+        this.#publishPresence()
         pending.close()
         unpublish?.()
         unpublish = undefined
@@ -163,6 +195,7 @@ class QuestionCards {
     // the tool call row builds another one from the same transcript record.
     pending.attachSeat({ hide: pending.review === undefined ? card.hide : card.remove })
     this.#cards.set(pending.key, card)
+    this.#publishPresence()
     return card
   }
 
@@ -428,6 +461,9 @@ export function apply(ctx: ClientContext): void {
     inject: (sessionId: SessionId) => ({
       revealPanel: (callId: string) => ctx.get('userQuestionPanels')?.reveal(sessionId, callId) ?? false,
       reviewPanel: (callId: string, record: UserQuestionRecord) => ctx.get('userQuestionPanels')?.review(sessionId, callId, record) ?? false,
+      keyedHooks: {
+        questionPanelLive: (callId: string) => cards.presence(sessionId, callId),
+      },
     }),
   }, AskHistoryRow))
   ctx.slots.inject('conversation.composer', () => ctx.slots.register(
@@ -454,4 +490,4 @@ export function apply(ctx: ClientContext): void {
 }
 
 // Exported for the built-closure behavior tests; the client loader ignores it.
-export { PendingQuestion, SettingsEntry }
+export { PendingQuestion, QuestionCards, SettingsEntry }

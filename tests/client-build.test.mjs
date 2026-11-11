@@ -32,12 +32,30 @@ const fakeRequire = (id) => {
 }
 const bundle = entry.factory(fakeRequire)
 const PendingQuestion = bundle.PendingQuestion
+const QuestionCards = bundle.QuestionCards
 
 test('bundle is one loader closure exposing the client contract', () => {
   assert.equal(entry.id, 'dsh-better-ask-user')
   assert.equal(typeof bundle.apply, 'function')
   assert.ok(Array.isArray(bundle.inject))
   assert.equal(typeof PendingQuestion, 'function')
+  assert.equal(typeof QuestionCards, 'function')
+})
+
+test('card presence follows registration and removal for the history row', () => {
+  const cards = new QuestionCards(() => () => {})
+  const presence = cards.presence('session', 'call')
+  let changes = 0
+  const stop = presence.subscribe(() => { changes += 1 })
+  try {
+    assert.equal(presence.getSnapshot(), false)
+    const card = cards.ensure('session', [{ id: 'q', question: 'Pick' }], 'call')
+    assert.equal(presence.getSnapshot(), true)
+    assert.equal(changes, 1)
+    card.remove()
+    assert.equal(presence.getSnapshot(), false)
+    assert.equal(changes, 2)
+  } finally { stop() }
 })
 
 function harness(settings) {
@@ -131,7 +149,7 @@ test('css modules build: file-scoped names, no cross-file collisions, valid svg 
     }
   }
   const css = styleTags.map((tag) => tag.textContent).join('\n')
-  for (const scoped of ['QuestionComposer_card', 'PlanReviewPanel_card', 'AskHistoryRow_row', 'QuestionReplyView_bubble', 'QuestionWaitBar_bar', 'settings_choices', 'settings_choice', 'settings_sectionLabel']) {
+  for (const scoped of ['QuestionComposer_card', 'PlanReviewPanel_card', 'AskHistoryRow_row', 'AskHistoryRow_state', 'QuestionReplyView_bubble', 'QuestionWaitBar_bar', 'settings_choices', 'settings_choice', 'settings_sectionLabel']) {
     assert.match(css, new RegExp('\\.' + scoped + '[ ,{]'), scoped + ' must be scoped per source file')
   }
   assert.doesNotMatch(css, /bau-/, 'no naive prefix rewriting may remain')

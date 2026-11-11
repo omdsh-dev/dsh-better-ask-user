@@ -181,24 +181,162 @@ test('plan controls recover when foreground settlement becomes a late reply', as
 })
 
 
-test('history row reopens pending calls and replays nested answered calls with full question details', () => {
+const rowArgs = JSON.stringify({ questions: [{ id: 'q', question: 'Pick', detail: '**Context**', multi_select: true, options: [{ label: 'A' }] }] })
+
+function rowProps({ callId = 'history-call', state = { live: false, projected: undefined }, reveal, review } = {}) {
+  return {
+    callId,
+    t,
+    useProjection: (_key, select) => select(state.projected),
+    useQuestionPanelLive: (_key, select = value => value) => select(state.live),
+    revealPanel: reveal ?? (() => true),
+    reviewPanel: review ?? (() => true),
+  }
+}
+
+test('history row opens a live card, then reviews a settled call with full question details', () => {
   const calls = []
-  const argsRaw = JSON.stringify({ questions: [{ id: 'q', question: 'Pick', detail: '**Context**', multi_select: true, options: [{ label: 'A' }] }] })
-  const props = { callId: 'history-call', t, revealPanel: id => { calls.push(['open', id]); return true }, reviewPanel: (id, record) => { calls.push(['review', id, record]); return true } }
+  const state = { live: true }
+  const props = rowProps({
+    state,
+    reveal: id => { calls.push(['open', id]); return true },
+    review: (id, record) => { calls.push(['review', id, record]); return true },
+  })
   let tree
-  act(() => { tree = create(React.createElement(AskHistoryRow, { ...props, phase: 'end', block: { kind: 'tool-result', call: { argsRaw }, content: [{ type: 'text', text: JSON.stringify({ pending: true }) }] } })) })
+  act(() => { tree = create(React.createElement(AskHistoryRow, { ...props, phase: 'result', block: { kind: 'tool-result', call: { argsRaw: rowArgs }, content: [{ type: 'text', text: JSON.stringify({ pending: true }) }] } })) })
   act(() => button(tree, 'Open').props.onClick())
   assert.deepEqual(calls, [['open', 'history-call']])
   const answers = [{ id: 'q', selected: ['A'] }]
-  act(() => tree.update(React.createElement(AskHistoryRow, { ...props, phase: 'end', block: { kind: 'tool-result', call: { argsRaw }, content: [{ type: 'text', text: JSON.stringify({ answers }) }] } })))
+  state.live = false
+  act(() => { tree.update(React.createElement(AskHistoryRow, { ...props, phase: 'result', block: { kind: 'tool-result', call: { argsRaw: rowArgs }, content: [{ type: 'text', text: JSON.stringify({ answers }) }] } })) })
   act(() => button(tree, 'Review').props.onClick())
   assert.equal(calls[1][1], 'history-call')
   assert.equal(calls[1][2].questions[0].detail, '**Context**')
   assert.equal(calls[1][2].questions[0].multiSelect, true)
   assert.deepEqual(calls[1][2].answers, answers)
-  act(() => tree.update(React.createElement(AskHistoryRow, { ...props, phase: 'start', block: { argsRaw } })))
+  state.live = true
+  act(() => { tree.update(React.createElement(AskHistoryRow, { ...props, phase: 'start', block: { argsRaw: rowArgs } })) })
   assert.ok(button(tree, 'Open'))
   act(() => tree.unmount())
+})
+
+test('an interrupted settled call reviews its questions and never offers a dead open', () => {
+  let seen
+  const props = rowProps({
+    callId: 'aborted',
+    reveal: () => { throw new Error('must not open a removed card') },
+    review: (_id, record) => { seen = record; return true },
+  })
+  const block = {
+    kind: 'tool-result', call: { argsRaw: rowArgs },
+    content: [{ type: 'text', text: 'Error: ask_user_question was aborted before the user answered' }],
+    isError: true, error: { name: 'UserQuestionError', code: 'ASK_ABORTED' },
+  }
+  let tree
+  try {
+    act(() => { tree = create(React.createElement(AskHistoryRow, { ...props, phase: 'result', block })) })
+    assert.equal(button(tree, 'Open'), undefined)
+    assert.ok(JSON.stringify(tree.toJSON()).includes(en['history.interrupted']))
+    act(() => button(tree, 'Review').props.onClick())
+    assert.deepEqual(seen.answers, [])
+    assert.equal(seen.questions[0].question, 'Pick')
+  } finally { if (tree) act(() => tree.unmount()) }
+})
+
+test('a cancelled settled call reviews its questions under the cancelled label', () => {
+  const props = rowProps({ callId: 'cancelled' })
+  const block = {
+    kind: 'tool-result', call: { argsRaw: rowArgs },
+    content: [{ type: 'text', text: 'Error: ask_user_question was cancelled' }],
+    isError: true, error: { name: 'UserQuestionError', code: 'ASK_CANCELLED' },
+  }
+  let tree
+  try {
+    act(() => { tree = create(React.createElement(AskHistoryRow, { ...props, phase: 'result', block })) })
+    assert.equal(button(tree, 'Open'), undefined)
+    assert.ok(JSON.stringify(tree.toJSON()).includes(en['history.cancelled']))
+    assert.ok(button(tree, 'Review'))
+  } finally { if (tree) act(() => tree.unmount()) }
+})
+
+test('a pending result whose card was removed reviews instead of offering a dead open', () => {
+  let seen
+  const props = rowProps({ callId: 'pending-gone', review: (_id, record) => { seen = record; return true } })
+  const block = { kind: 'tool-result', call: { argsRaw: rowArgs }, content: [{ type: 'text', text: JSON.stringify({ pending: true, callId: 'pending-gone' }) }] }
+  let tree
+  try {
+    act(() => { tree = create(React.createElement(AskHistoryRow, { ...props, phase: 'result', block })) })
+    assert.equal(button(tree, 'Open'), undefined)
+    act(() => button(tree, 'Review').props.onClick())
+    assert.deepEqual(seen.answers, [])
+  } finally { if (tree) act(() => tree.unmount()) }
+})
+
+test('a late reply reviews the answers recorded by the projection', () => {
+  const answers = [{ id: 'q', selected: ['A'] }]
+  let seen
+  const props = rowProps({
+    callId: 'late',
+    state: { live: false, projected: { settled: [{ callId: 'late', answers }] } },
+    review: (_id, record) => { seen = record; return true },
+  })
+  const block = { kind: 'tool-result', call: { argsRaw: rowArgs }, content: [{ type: 'text', text: JSON.stringify({ pending: true, callId: 'late' }) }] }
+  let tree
+  try {
+    act(() => { tree = create(React.createElement(AskHistoryRow, { ...props, phase: 'result', block })) })
+    act(() => button(tree, 'Review').props.onClick())
+    assert.deepEqual(seen.answers, answers)
+  } finally { if (tree) act(() => tree.unmount()) }
+})
+
+test('a running call with no live card offers neither open nor review', () => {
+  const props = rowProps({ callId: 'starting' })
+  let tree
+  try {
+    act(() => { tree = create(React.createElement(AskHistoryRow, { ...props, phase: 'start', block: { argsRaw: rowArgs } })) })
+    assert.equal(button(tree, 'Open'), undefined)
+    assert.equal(button(tree, 'Review'), undefined)
+  } finally { if (tree) act(() => tree.unmount()) }
+})
+
+test('removing the live card takes the open affordance with it', () => {
+  const state = { live: true }
+  const props = rowProps({ callId: 'removed', state })
+  let tree
+  try {
+    act(() => { tree = create(React.createElement(AskHistoryRow, { ...props, phase: 'start', block: { argsRaw: rowArgs } })) })
+    assert.ok(button(tree, 'Open'))
+    state.live = false
+    act(() => { tree.update(React.createElement(AskHistoryRow, { ...props, phase: 'start', block: { argsRaw: rowArgs } })) })
+    assert.equal(button(tree, 'Open'), undefined)
+    assert.equal(button(tree, 'Review'), undefined)
+  } finally { if (tree) act(() => tree.unmount()) }
+})
+
+test('a review card with no recorded answers says so', () => {
+  const questions = [{ id: 'q', question: 'Pick', options: [{ label: 'A' }] }]
+  const pending = new PendingQuestion('session', questions, 'review-call', undefined, [])
+  globalThis.window = { addEventListener() {}, removeEventListener() {} }
+  globalThis.document = { addEventListener() {}, removeEventListener() {}, activeElement: null }
+  function Surface() {
+    const [progress, setProgress] = React.useState({})
+    const actions = React.useMemo(() => ({ replace() {}, clear() {}, prune() {} }), [])
+    return React.createElement(QuestionComposer, {
+      matched: pending, t, actions, renderSlot: () => null,
+      useStore: select => select({ progressByRequest: progress }),
+      useQuestionCard: (_key, select) => select(React.useSyncExternalStore(pending.subscribe, pending.getSnapshot)),
+    })
+  }
+  let tree
+  try {
+    act(() => { tree = create(React.createElement(Surface)) })
+    assert.ok(JSON.stringify(tree.toJSON()).includes(en['review.unanswered']))
+  } finally {
+    if (tree) act(() => tree.unmount())
+    pending.close()
+    delete globalThis.window
+    delete globalThis.document
+  }
 })
 
 test('option buttons use native keyboard activation and submit the selected original label', async () => {
@@ -287,9 +425,15 @@ test('settings save failure keeps the draft available to retry', async () => {
   } finally { act(() => tree.unmount()) }
 })
 
-test('history re-entry reports unavailable records and lets the user retry', () => {
+test('history re-entry reports an ended record without promising a retry', () => {
   let available = false
-  const props = { callId: 'closed', phase: 'start', block: { argsRaw: '{}' }, t, revealPanel: () => available, reviewPanel: () => false }
+  const props = {
+    callId: 'closed', phase: 'start', block: { argsRaw: '{}' }, t,
+    useProjection: (_key, select) => select(undefined),
+    useQuestionPanelLive: (_key, select = value => value) => select(true),
+    revealPanel: () => available,
+    reviewPanel: () => false,
+  }
   let tree
   try {
     act(() => { tree = create(React.createElement(AskHistoryRow, props)) })
@@ -331,4 +475,3 @@ test('reply copy exposes pending, failed and copied states while retaining full 
     delete globalThis.window
   }
 })
-
