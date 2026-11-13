@@ -126,7 +126,9 @@ export function AskHistoryRow({
       ? t('history.interrupted')
       : errorCode === 'ASK_CANCELLED'
         ? t('history.cancelled')
-        : undefined
+        : phase === 'start'
+          ? t('history.waiting')
+          : undefined
   const summary = questions?.[0]?.question.split('\n').find(line => line.trim() !== '')?.trim() ?? t('history.title')
   const action = live
     ? () => revealPanel(callId)
