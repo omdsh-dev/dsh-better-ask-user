@@ -475,6 +475,7 @@ test('reply copy exposes pending, failed and copied states while retaining full 
     delete globalThis.window
   }
 })
+
 test('a pending start without a live card shows the waiting fallback and no dead open', () => {
   const props = rowProps({ callId: 'ptc-pending', state: { live: false } })
   let tree

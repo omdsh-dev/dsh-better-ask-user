@@ -126,7 +126,6 @@ for (const projectionFirst of [false, true]) {
     })
   }
 }
-
 test('a PTC nested call id keeps its exact identity and answers the live wait', async () => {
   const h = harness(false, { callId: 'call:ptc:1' })
   try {
@@ -143,7 +142,11 @@ test('a PTC nested call id keeps its exact identity and answers the live wait', 
 
 test('an unscoped event owner falls back to the request agent identity', async () => {
   const agent = {}
-  const h = harness(false, { owner: {}, agent, scopeOf: ctx => ctx === agent ? sessionId : undefined })
+  const h = harness(false, {
+    owner: {},
+    agent,
+    scopeOf: ctx => ctx === agent ? sessionId : undefined,
+  })
   try {
     const result = h.request({ waitMs: 5000, timeoutMode: 'native' })
     await Promise.resolve()
