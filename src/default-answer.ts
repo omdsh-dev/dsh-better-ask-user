@@ -1,9 +1,13 @@
 /** Host-authored default answer for the configured timeout behavior. */
+import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
+
+export type ModelQuestion = Omit<AskUserQuestionItem, 'multiSelect' | 'intent'> & { multi_select?: boolean }
+export type DefaultQuestion = Pick<ModelQuestion, 'id' | 'options' | 'multi_select'>
 
 const RECOMMENDED_SUFFIX = /\s*(?:\((?:recommended|推荐)\)|（(?:recommended|推荐)）)\s*$/i
 
 /** Whether one option label carries the conventional recommendation suffix. */
-export function isRecommended(label) {
+export function isRecommended(label: unknown) {
   return typeof label === 'string' && RECOMMENDED_SUFFIX.test(label)
 }
 
@@ -18,8 +22,8 @@ export function isRecommended(label) {
  * @param questions - model-facing question items (raw args shape).
  * @returns an answer batch with autoSelected true.
  */
-export function buildDefaultAnswer(questions) {
-  const answers = []
+export function buildDefaultAnswer(questions: readonly DefaultQuestion[]): AskUserQuestionAnswer & { autoSelected: true } {
+  const answers: AskUserQuestionAnswer['answers'] = []
   for (const question of questions) {
     const options = Array.isArray(question.options) ? question.options : []
     if (options.length === 0) {

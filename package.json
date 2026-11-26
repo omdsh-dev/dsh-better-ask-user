@@ -1,6 +1,6 @@
 {
   "name": "dsh-better-ask-user",
-  "version": "0.3.6",
+  "version": "0.3.7-alpha.1",
   "description": "Independent ask_user_question plugin: configurable wait, input-extended countdown, markdown/mobile card, native or default timeout behavior, and PTC deadline exemption.",
   "license": "Apache-2.0",
   "repository": {
@@ -8,41 +8,70 @@
     "url": "git+https://github.com/omdsh-dev/dsh-better-ask-user.git"
   },
   "type": "module",
-  "main": "src/index.js",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
   "exports": {
-    ".": "./src/index.js",
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "engines": {
-    "node": ">=24.9.0",
-    "dsh": ">=0.2.2-rc.2 <0.3.0"
+    "node": "^24.22.3 || >=26.13.1",
+    "dsh": ">=0.2.3-alpha.2 <0.3.0"
   },
   "scripts": {
-    "pretest": "node scripts/build-client.mjs",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-client.mjs",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
+    "pretest": "npm run build",
     "test": "node --test",
-    "build": "node scripts/build-client.mjs"
+    "prepare": "npm run build"
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": "~3.19.0",
-    "dsh-better-ptc": "0.2.2"
+    "@deepseek-ai/schemastery": "~3.20.0-alpha.1",
+    "dsh-better-ptc": "0.2.3-alpha.1"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "~4.1.0",
-    "@deepseek-ai/dsh-agent": ">=0.2.2-rc.2 <0.3.0",
-    "@deepseek-ai/dsh-llm": ">=0.2.2-rc.2 <0.3.0",
-    "@deepseek-ai/dsh-session": ">=0.2.2-rc.2 <0.3.0",
-    "@deepseek-ai/dsh-system-prompt": ">=0.2.2-rc.2 <0.3.0",
-    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.2 <0.3.0",
-    "@deepseek-ai/dsh-user-questions": ">=0.2.2-rc.2 <0.3.0",
+    "@deepseek-ai/cordis": "~4.2.0-alpha.1",
+    "@deepseek-ai/dsh-agent": ">=0.2.3-alpha.2 <0.3.0",
+    "@deepseek-ai/dsh-llm": ">=0.2.3-alpha.2 <0.3.0",
+    "@deepseek-ai/dsh-session": ">=0.2.3-alpha.2 <0.3.0",
+    "@deepseek-ai/dsh-system-prompt": ">=0.2.3-alpha.2 <0.3.0",
+    "@deepseek-ai/dsh-tools": ">=0.2.3-alpha.2 <0.3.0",
+    "@deepseek-ai/dsh-user-questions": ">=0.2.3-alpha.2 <0.3.0",
     "react": "^18.2.0"
   },
   "devDependencies": {
+    "@deepseek-ai/cordis": "4.2.0-alpha.1",
+    "@deepseek-ai/dsh-agent": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-api-remotes": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-brand": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-client-locale": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-client-store": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-client-ui-chat": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-client-ui-session": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-client-ui-slots": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-client-ui-tool": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-llm": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-session": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-system-prompt": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-tools": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-typert-protocol": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-user-questions": "0.2.3-alpha.2",
+    "@types/node": "24.19.2",
+    "@types/react": "18.3.31",
     "clsx": "^2.1.1",
     "esbuild": "^0.25.0",
     "js-yaml": "^4.2.0",
     "react": "18.3.1",
-    "react-test-renderer": "18.3.1"
+    "react-test-renderer": "18.3.1",
+    "typescript": "5.9.3"
   },
   "dsh": {
     "bundle": {
@@ -62,8 +91,9 @@
     }
   },
   "files": [
-    "src",
-    "lib/client.js",
+    "lib/**/*.js",
+    "lib/**/*.d.ts",
+    "lib/**/*.js.map",
     "cordis.patch.yml",
     "README.md",
     "LICENSE",

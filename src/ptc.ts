@@ -1,5 +1,7 @@
 /** Register ask_user_question with the shared PTC deadline exemption service. */
-export function mountPtcExemption(ctx) {
+import type { Context } from '@deepseek-ai/cordis'
+
+export function mountPtcExemption(ctx: Context) {
   if (typeof ctx.inject !== 'function') return
   ctx.inject(['betterPtc'], (runtime) => {
     if (runtime?.betterPtc === undefined) return

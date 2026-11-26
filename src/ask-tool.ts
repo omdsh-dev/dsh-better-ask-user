@@ -1,7 +1,12 @@
 /** ask_user_question scope shadow: official contract plus the plugin-managed wait. */
 import { ToolArgsError, validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
 import { TIMED_WAIT_PARAMETER } from '@deepseek-ai/dsh-user-questions'
+import type { Context } from '@deepseek-ai/cordis'
+import type { JsonSchemaNode, ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
+import type { AskUserQuestionAnswer, AskUserQuestionRequest } from '@deepseek-ai/dsh-user-questions'
+import type { AskConfig } from './config.js'
 import { buildDefaultAnswer } from './default-answer.js'
+import type { ModelQuestion } from './default-answer.js'
 
 /** Model-visible notice for the native pending result. */
 export const PENDING_QUESTION_NOTICE = 'No answer batch arrived before the timeout. This is pending, not a skipped answer. Continue useful independent work. The user can still answer; their reply will be a user message identified as answer_to_pending_question with this callId and the original questions. Do not treat this as permission.'
@@ -9,7 +14,7 @@ export const PENDING_QUESTION_NOTICE = 'No answer batch arrived before the timeo
 /** Model-visible warning for a host auto-selected default batch. */
 export const AUTO_SELECTED_WARNING = 'These answers were auto-selected by the host timeout behavior, not submitted by the user. Do not treat them as user confirmation.'
 
-function questionRequest(questions, exec) {
+function questionRequest(questions: ModelQuestion[], exec: ToolRunContext): AskUserQuestionRequest {
   return {
     questions: questions.map(question => ({
       id: question.id,
@@ -26,7 +31,7 @@ function questionRequest(questions, exec) {
   }
 }
 
-function validateQuestionIds(questions) {
+function validateQuestionIds(questions: ModelQuestion[]) {
   const ids = new Set()
   for (const question of questions) {
     if (ids.has(question.id)) throw new Error('question id ' + JSON.stringify(question.id) + ' must be unique within this call')
@@ -34,7 +39,7 @@ function validateQuestionIds(questions) {
   }
 }
 
-function answerResult(result) {
+function answerResult(result: AskUserQuestionAnswer & { autoSelected?: boolean }) {
   return {
     answers: result.answers.map(answer => ({
       id: answer.id,
@@ -46,11 +51,11 @@ function answerResult(result) {
 }
 
 /** Add detail and the next host marker used to replay pending questions. */
-function parametersWithDetail(parameters) {
+function parametersWithDetail(parameters: ToolDefinition['parameters']) {
   if (parameters === undefined) return parameters
-  const next = structuredClone(parameters)
+  const next = structuredClone(parameters) as JsonSchemaNode & typeof parameters
   // DSH classifies logged ask calls by this schema key, not by askTimed usage.
-  next.properties[TIMED_WAIT_PARAMETER] = {
+  next.properties![TIMED_WAIT_PARAMETER] = {
     type: 'integer',
     description: 'Host continuation marker; omit. The plugin setting, not this argument, controls foreground wait duration.',
   }
@@ -65,7 +70,7 @@ function parametersWithDetail(parameters) {
 }
 
 /** Allow the additive auto-selected warning fields on the normal answer branch. */
-function extendAutoSelectedSchema(schema) {
+function extendAutoSelectedSchema(schema: JsonSchemaNode) {
   const branches = Array.isArray(schema?.oneOf) ? schema.oneOf : [schema]
   for (const branch of branches) {
     const properties = branch?.properties
@@ -84,7 +89,7 @@ function extendAutoSelectedSchema(schema) {
 }
 
 /** The timed path can return the official pending shape; keep it valid. */
-function outputWithPending(base) {
+function outputWithPending(base: ToolDefinition) {
   const output = { ...base.output }
   const schema = extendAutoSelectedSchema(structuredClone(base.output.schema))
   if (Array.isArray(schema?.oneOf) && schema.oneOf.some(branch => branch?.properties?.pending !== undefined)) {
@@ -116,13 +121,15 @@ function outputWithPending(base) {
  * @param readConfig - live config reader.
  * @returns a ToolDefinition with the official contract and the plugin wait.
  */
-export function createBetterAskTool(ctx, base, readConfig) {
+export function createBetterAskTool(ctx: Context, base: ToolDefinition, readConfig: () => AskConfig): ToolDefinition {
   const output = outputWithPending(base)
   const parameters = parametersWithDetail(base.parameters)
 
-  const execute = async (args, exec) => {
-    const violations = validateJsonSchemaValue(parameters, args, '')
+  const execute = async (input: unknown, exec: ToolRunContext) => {
+    const violations = validateJsonSchemaValue(parameters, input, '')
     if (violations.length > 0) throw new ToolArgsError(violations)
+    // The official input schema has validated this model-facing question shape.
+    const args = input as { questions: ModelQuestion[] }
     validateQuestionIds(args.questions)
 
     const userQuestions = ctx.get('userQuestions')
@@ -145,7 +152,7 @@ export function createBetterAskTool(ctx, base, readConfig) {
     if (exec.agent === undefined) throw new Error('timed questions require a live agent')
 
     const waitMs = seconds * 1000
-    const result = await userQuestions.askTimed({
+    const request: Parameters<Context['userQuestions']['askTimed']>[0] = {
       ...questions,
       agent: exec.agent,
       better: {
@@ -153,7 +160,8 @@ export function createBetterAskTool(ctx, base, readConfig) {
         timeoutMode: mode,
         ...(defaultAnswer !== undefined ? { defaultAnswer } : {}),
       },
-    }, exec.callId, waitMs)
+    }
+    const result = await userQuestions.askTimed(request, exec.callId, waitMs)
     if ('pending' in result) {
       if (mode === 'default' && defaultAnswer !== undefined) return answerResult(defaultAnswer)
       return { ...result, message: PENDING_QUESTION_NOTICE }

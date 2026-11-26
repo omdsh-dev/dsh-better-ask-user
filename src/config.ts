@@ -22,21 +22,27 @@ export const Config = z.object({
   goalTimeoutBehavior: z.union(['native', 'default']).default(DEFAULTS.goalTimeoutBehavior).volatile(),
 })
 
-function primitive(value) {
-  return value !== null && typeof value === 'object' && typeof value.get === 'function'
-    ? value.get()
+export interface AskConfig {
+  questionTimeoutSeconds: number
+  timeoutBehavior: 'native' | 'default'
+  goalTimeoutBehavior: 'native' | 'default'
+}
+
+function primitive(value: unknown): unknown {
+  return value !== null && typeof value === 'object' && typeof (value as { get?: unknown }).get === 'function'
+    ? (value as { get(): unknown }).get()
     : value
 }
 
 /** Normalize arbitrary live config to the exact default shape; never throw. */
-export function normalizeConfig(value) {
-  const source = value !== null && typeof value === 'object' ? value : {}
+export function normalizeConfig(value: unknown): AskConfig {
+  const source = value !== null && typeof value === 'object' ? value as Record<string, unknown> : {}
   const seconds = primitive(source.questionTimeoutSeconds)
   const behavior = primitive(source.timeoutBehavior)
   const goalBehavior = primitive(source.goalTimeoutBehavior)
   return {
     questionTimeoutSeconds: seconds === -1
-      || (Number.isInteger(seconds) && seconds >= 1 && seconds <= MAX_QUESTION_TIMEOUT_SECONDS)
+      || (typeof seconds === 'number' && Number.isInteger(seconds) && seconds >= 1 && seconds <= MAX_QUESTION_TIMEOUT_SECONDS)
       ? seconds
       : DEFAULTS.questionTimeoutSeconds,
     timeoutBehavior: behavior === 'native' || behavior === 'default'
@@ -49,6 +55,6 @@ export function normalizeConfig(value) {
 }
 
 /** Read the current live config. */
-export function readConfig(value) {
+export function readConfig(value: unknown): AskConfig {
   return normalizeConfig(value)
 }

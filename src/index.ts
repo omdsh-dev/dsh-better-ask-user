@@ -1,4 +1,6 @@
 /** dsh-better-ask-user host row: ask_user_question shadow, settings, PTC exemption. */
+import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { Config, readConfig as snapshotConfig } from './config.js'
 import { createBetterAskTool } from './ask-tool.js'
 import { mountPtcExemption } from './ptc.js'
@@ -8,35 +10,41 @@ export { Config }
 export const name = 'dsh-better-ask-user'
 export const inject = ['agents', 'tools', 'userQuestions']
 
-export function apply(ctx, config = {}) {
+interface AgentState {
+  agent: Agent
+  actor: Context
+  askDispose: (() => void) | undefined
+}
+
+export function apply(ctx: Context, config: unknown = {}) {
   const readConfig = () => snapshotConfig(config)
   mountSettings(ctx)
   mountLegacyMigration(ctx)
   mountPtcExemption(ctx)
 
-  const states = new Map()
+  const states = new Map<Agent, AgentState>()
 
-  function register(state) {
-    const tools = state.actor.get('tools')
+  function register(state: AgentState) {
+    const tools = state.actor.get('tools')!
     const base = tools.get('ask_user_question', state.agent)
     if (base === undefined) return
     state.askDispose = tools.register(createBetterAskTool(ctx, base, readConfig))
   }
 
-  function setup(agent) {
+  function setup(agent: Agent) {
     if (states.has(agent)) return states.get(agent)
-    const state = { agent, actor: agent.ctx, askDispose: undefined }
+    const state: AgentState = { agent, actor: agent.ctx, askDispose: undefined }
     states.set(agent, state)
     register(state)
     return state
   }
 
-  function cleanup(state) {
+  function cleanup(state: AgentState) {
     state.askDispose?.()
     state.askDispose = undefined
   }
 
-  ctx.on('agent/created', ({ agent }) => { setup(agent) })
+  ctx.on('agent/created', ({ agent }): undefined => { setup(agent) })
   ctx.on('agent/disposed', ({ agent }) => {
     const state = states.get(agent)
     if (state !== undefined) cleanup(state)

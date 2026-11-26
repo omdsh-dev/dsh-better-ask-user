@@ -1,4 +1,18 @@
 /** Use the custom browser settings page and migrate the legacy goal wait. */
+import type { Context } from '@deepseek-ai/cordis'
+
+interface SettingsDescriptor {
+  ns: string
+  user?: Record<string, unknown> | null
+  value?: Record<string, unknown> | null
+  revision?: unknown
+}
+
+export interface SettingsService {
+  writable?: boolean
+  describe(): unknown | Promise<unknown>
+  update(ns: string, patch: { questionTimeoutSeconds: number }, revision: unknown): unknown | Promise<unknown>
+}
 
 export const LEGACY_GOAL_NS = 'dsh-better-goal'
 export const ASK_NS = 'dsh-better-ask-user'
@@ -6,24 +20,24 @@ export const MAX_QUESTION_TIMEOUT_SECONDS = 2147483
 const WAIT_MS = 3000
 const WAIT_INTERVAL_MS = 50
 
-const sleep = ms => new Promise(resolve => { setTimeout(resolve, ms) })
+const sleep = (ms: number) => new Promise<void>(resolve => { setTimeout(resolve, ms) })
 
-function hasOwn(value, key) {
+function hasOwn(value: unknown, key: PropertyKey) {
   return value !== null && typeof value === 'object' && Object.hasOwn(value, key)
 }
 
-async function descriptor(service, ns) {
+async function descriptor(service: SettingsService, ns: string): Promise<SettingsDescriptor | undefined> {
   try {
     const rows = await service.describe()
     if (!Array.isArray(rows)) return undefined
-    return rows.find(row => row?.ns === ns)
+    return rows.find((row: unknown) => (row as { ns?: unknown } | null | undefined)?.ns === ns) as SettingsDescriptor | undefined
   } catch {
     return undefined
   }
 }
 
-function validSeconds(value) {
-  return value === -1 || (Number.isInteger(value) && value >= 1 && value <= MAX_QUESTION_TIMEOUT_SECONDS)
+function validSeconds(value: unknown): value is number {
+  return value === -1 || (typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MAX_QUESTION_TIMEOUT_SECONDS)
 }
 
 /**
@@ -33,17 +47,17 @@ function validSeconds(value) {
  * @param service - settings service with describe / update.
  * @returns a status report.
  */
-export async function migrateLegacyQuestionTimeout(service) {
+export async function migrateLegacyQuestionTimeout(service: Partial<SettingsService> | null | undefined) {
   if (typeof service?.describe !== 'function' || typeof service?.update !== 'function') {
     return { status: 'unavailable' }
   }
   const deadline = Date.now() + WAIT_MS
-  let source = await descriptor(service, LEGACY_GOAL_NS)
-  let target = await descriptor(service, ASK_NS)
+  let source = await descriptor(service as SettingsService, LEGACY_GOAL_NS)
+  let target = await descriptor(service as SettingsService, ASK_NS)
   while ((source === undefined || target === undefined) && Date.now() < deadline) {
     await sleep(WAIT_INTERVAL_MS)
-    source = await descriptor(service, LEGACY_GOAL_NS)
-    target = await descriptor(service, ASK_NS)
+    source = await descriptor(service as SettingsService, LEGACY_GOAL_NS)
+    target = await descriptor(service as SettingsService, ASK_NS)
   }
   if (source === undefined || target === undefined) return { status: 'pending' }
   if (!hasOwn(source.user, 'questionTimeoutSeconds')) return { status: 'no-change' }
@@ -56,14 +70,14 @@ export async function migrateLegacyQuestionTimeout(service) {
   } catch (error) {
     return { status: 'error', error: error instanceof Error ? error.message : String(error) }
   }
-  const after = await descriptor(service, ASK_NS)
+  const after = await descriptor(service as SettingsService, ASK_NS)
   return after?.user?.questionTimeoutSeconds === value
     ? { status: 'complete', value }
     : { status: 'pending', value }
 }
 
 /** Use the custom browser settings page instead of a generated form. */
-export function mountSettings(ctx) {
+export function mountSettings(ctx: Context) {
   ctx.inject(['settings'], (inner) => {
     const dispose = inner.settings.configure({ auto: false }, ctx.fiber)
     inner.effect(() => dispose, 'better-ask-user: settings page')
@@ -71,7 +85,7 @@ export function mountSettings(ctx) {
 }
 
 /** Run the legacy goal-wait migration once the settings service is available. */
-export function mountLegacyMigration(ctx) {
+export function mountLegacyMigration(ctx: Context) {
   ctx.inject(['settings'], (inner) => {
     const service = inner.settings ?? inner
     void migrateLegacyQuestionTimeout(service).catch((error) => {
